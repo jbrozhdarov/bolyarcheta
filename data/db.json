@@ -1,0 +1,106 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "Треньор Мартин",
+      "email": "coach@bolyarcheta.bg",
+      "passwordHash": "$2a$10$erTRhHPp45xxZz/5fgStC.Gfeit9Bn8spI.S7ro6YRpgzcs1IAePW",
+      "role": "coach",
+      "createdAt": "2026-03-17T18:57:18.892Z"
+    },
+    {
+      "id": 2,
+      "name": "Треньор Иван",
+      "email": "assistant@bolyarcheta.bg",
+      "passwordHash": "$2a$10$f5MppXr47xoqit6LikO3Te.f6LBSbIQ0SyqMEZHdv70szlcXXFTlC",
+      "role": "coach",
+      "createdAt": "2026-03-17T18:57:18.967Z"
+    },
+    {
+      "id": 3,
+      "name": "Иван",
+      "email": "ivan@bolyarcheta.bg",
+      "passwordHash": "$2a$10$4BmN2ytD7PaHSnQovxpDuePxnImQyimAHyNw51/eNVHAqgs8OOUzq",
+      "role": "player",
+      "createdAt": "2026-03-17T18:57:19.042Z"
+    },
+    {
+      "id": 4,
+      "name": "Георги",
+      "email": "georgi@bolyarcheta.bg",
+      "passwordHash": "$2a$10$R0U34cH1J3csHUlbMJWTRupPhFO0QsvMx2I62FnIPFCHMBIqA6Jii",
+      "role": "player",
+      "createdAt": "2026-03-17T18:57:19.116Z"
+    },
+    {
+      "id": 5,
+      "name": "Ники",
+      "email": "niki@bolyarcheta.bg",
+      "passwordHash": "$2a$10$KDB7emHCBHFif6WKW/b9pOjMpzFDh/ZNqoSjoWGYGQoslKxwe1xDu",
+      "role": "player",
+      "createdAt": "2026-03-17T18:57:19.191Z"
+    },
+    {
+      "id": 6,
+      "name": "Петър",
+      "email": "petar@bolyarcheta.bg",
+      "passwordHash": "$2a$10$3vMNaRBlUsRobQme4fbW0uo6AIKD1UaJd3MSffoXansOfWB5AlGfm",
+      "role": "player",
+      "createdAt": "2026-03-17T18:57:19.266Z"
+    },
+    {
+      "id": 7,
+      "name": "Мартин",
+      "email": "martin@bolyarcheta.bg",
+      "passwordHash": "$2a$10$KLPiavqIFYzVpHQ.0L4KBuZI6YRjtbxm7GuKmE8aQT7CMtJbJtUiW",
+      "role": "player",
+      "createdAt": "2026-03-17T18:57:19.341Z"
+    }
+  ],
+  "teams": [
+    {
+      "id": 1,
+      "name": "СК \"Болярчета\" U10",
+      "coachId": 1,
+      "invitedCoachEmails": [
+        "assistant@bolyarcheta.bg"
+      ],
+      "assistantCoachIds": [
+        2
+      ],
+      "invitedEmails": [
+        "ivan@bolyarcheta.bg",
+        "georgi@bolyarcheta.bg",
+        "niki@bolyarcheta.bg"
+      ],
+      "playerIds": [
+        3,
+        4,
+        5
+      ],
+      "nominationDeadlineAt": "2026-03-18T00:00:00.000Z",
+      "createdAt": "2026-03-17T18:57:19.341Z"
+    },
+    {
+      "id": 2,
+      "name": "СК \"Болярчета\" U12",
+      "coachId": 1,
+      "invitedCoachEmails": [],
+      "assistantCoachIds": [],
+      "invitedEmails": [
+        "petar@bolyarcheta.bg",
+        "martin@bolyarcheta.bg"
+      ],
+      "playerIds": [
+        6,
+        7
+      ],
+      "nominationDeadlineAt": "2026-03-18T00:00:00.000Z",
+      "createdAt": "2026-03-17T18:57:19.341Z"
+    }
+  ],
+  "challenges": [],
+  "settings": {
+    "monthKey": "2026-03"
+  }
+}

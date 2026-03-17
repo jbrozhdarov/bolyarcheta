@@ -1,0 +1,15 @@
+<%- include('partials/header', { title: 'Вход | СК Болярчета' }) %>
+<div class="login-page">
+  <div class="auth-card glass login-only">
+    <span class="club-mark">СК "Болярчета"</span>
+    <h2>Вход</h2>
+    <% if (flash) { %><div class="flash <%= flash.type %>" style="width:100%;margin:0 0 16px"><%= flash.message %></div><% } %>
+    <form method="post" action="/login" class="stack">
+      <label>Имейл<input type="email" name="email" required /></label>
+      <label>Парола<input type="password" name="password" required /></label>
+      <button class="btn btn-primary" type="submit">Влез</button>
+    </form>
+    <div class="auth-links">Нямаш акаунт? <a href="/register">Регистрация</a></div>
+  </div>
+</div>
+<%- include('partials/footer') %>

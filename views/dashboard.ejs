@@ -1,0 +1,335 @@
+<%- include('partials/header', { title: 'Портал | СК Болярчета' }) %>
+<div class="page-ambient"></div>
+<header class="hero <%= currentUser.role === 'player' ? 'hero-player' : 'hero-coach' %>">
+  <div class="hero-left">
+    <div class="hero-copy">
+      <div>
+        <span class="club-mark">СК "Болярчета"</span>
+        <h1>СК "Болярчета"</h1>
+        <p>Дигитален футболен портал за каналите на школата, дневните видео предизвикателства, анонимното оценяване и месечния ранкинг на децата.</p>
+      </div>
+      <div>
+        <div class="hero-kickers">
+          <div class="hero-kicker">Футболни мисии всеки ден</div>
+          <div class="hero-kicker">Канали по отбори</div>
+          <div class="hero-kicker">Чист и цветен дизайн</div>
+        </div>
+        <div class="hero-pitch" aria-hidden="true">
+          <div class="line center-h"></div>
+          <div class="line center-v"></div>
+          <div class="circle"></div>
+          <div class="goal left"></div>
+          <div class="goal right"></div>
+          <div class="hero-ball"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="hero-right">
+    <div class="user-chip">
+      <strong style="font-size:28px"><%= currentUser.name %></strong>
+      <div class="role"><%= currentUser.role === 'coach' ? 'Треньор' : 'Играч' %></div>
+      <div class="meta">
+        <div><strong>Школа:</strong> СК "Болярчета"</div>
+        <div><strong>Достъпни канали:</strong> <%= teams.length %></div>
+        <div><strong>Роля в каналите:</strong> създател, поканен треньор или играч</div>
+      </div>
+      <div class="user-actions">
+        <a class="btn btn-ghost" href="/logout">Изход</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.message %></div><% } %>
+
+<section class="stats-grid wrap">
+  <div class="stat-card">
+    <div class="stat-title">Моите канали</div>
+    <div class="stat-value"><%= teams.length %></div>
+    <div class="stat-sub">създадени от теб или споделени към теб</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-title">Активен канал</div>
+    <div class="stat-value"><%= team ? team.name : '—' %></div>
+    <div class="stat-sub">текущо избран отбор</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-title">Следваща номинация</div>
+    <div class="stat-value countdown" data-target="<%= team ? team.nominationDeadlineAt : '' %>">--:--:--</div>
+    <div class="stat-sub">брояч до следващо ново предизвикателство</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-title">Срок за отговор</div>
+    <div class="stat-value countdown" data-target="<%= team && team.activeChallenge && team.activeChallenge.responsesDueAt ? team.activeChallenge.responsesDueAt : '' %>">--:--:--</div>
+    <div class="stat-sub">24 часа след качване на основното видео</div>
+  </div>
+</section>
+
+<div class="layout wrap">
+  <aside class="sidebar glass">
+    <div class="sidebar-title">Канали на школата</div>
+    <div class="team-list">
+      <% teams.forEach(function(item){ %>
+        <a class="team-item <%= team && team.id === item.id ? 'active' : '' %>" href="/dashboard?team=<%= item.id %>">
+          <strong><%= item.name %></strong>
+          <span>Създател: <%= item.coach ? item.coach.name : '—' %></span>
+          <span><%= item.canManage ? 'Пълен контрол' : (item.canViewOnly ? 'Поканен треньор • преглед' : 'Играч в канала') %></span>
+        </a>
+      <% }) %>
+    </div>
+
+    <% if (currentUser.role === 'coach') { %>
+      <div class="panel-block">
+        <h4>Нов канал</h4>
+        <form method="post" action="/teams" class="stack">
+          <input type="text" name="name" placeholder="Напр. СК &quot;Болярчета&quot; U11" required />
+          <button class="btn btn-primary" type="submit">Създай канал</button>
+        </form>
+      </div>
+    <% } %>
+
+    <% if (team) { %>
+      <div class="panel-block">
+        <h4>Месечен ранкинг</h4>
+        <div class="ranking-list">
+          <% if (ranking.length === 0) { %>
+            <div class="empty">Още няма точки.</div>
+          <% } %>
+          <% ranking.forEach(function(item, idx){ %>
+            <div class="ranking-item">
+              <div>
+                <strong>#<%= idx + 1 %> <%= item.user.name %></strong>
+                <span><%= item.contributions %> участия</span>
+              </div>
+              <div class="points"><%= item.points.toFixed(1) %></div>
+            </div>
+          <% }) %>
+        </div>
+        <% if (currentUser.role === 'coach' && team.canManage) { %>
+          <form method="post" action="/ranking/reset" style="margin-top:12px">
+            <button class="btn btn-danger" type="submit">Занули моите канали за месеца</button>
+          </form>
+        <% } %>
+      </div>
+    <% } %>
+  </aside>
+
+  <main class="main">
+    <% if (!team) { %>
+      <section class="panel glass"><div class="empty">Нямаш достъпни канали още.</div></section>
+    <% } else { %>
+      <section class="panel glass">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Канал</div>
+            <h2><%= team.name %></h2>
+            <p>Треньорът-създател може да кани деца, да кани други треньори за преглед и да създава предизвикателства само в собствените си канали.</p>
+          </div>
+          <div class="pill-row">
+            <span class="pill">Деца: <%= team.players.length %></span>
+            <span class="pill">Поканени треньори: <%= team.assistantCoaches.length %></span>
+            <span class="pill"><%= team.canManage ? 'Ти си създател' : (team.canViewOnly ? 'Ти си поканен треньор' : 'Ти си играч') %></span>
+          </div>
+        </div>
+
+        <div class="member-grid">
+          <div class="inner-card">
+            <strong>Главен треньор</strong>
+            <span class="mini-note"><%= team.coach ? `${team.coach.name} • ${team.coach.email}` : '—' %></span>
+            <span class="owner-badge">Създател на канала</span>
+          </div>
+          <div class="inner-card">
+            <strong>Поканени треньори</strong>
+            <% if (team.assistantCoaches.length === 0) { %>
+              <span class="mini-note">Още няма поканени треньори.</span>
+            <% } %>
+            <% team.assistantCoaches.forEach(function(coach){ %>
+              <span class="mini-note"><%= coach.name %> • <%= coach.email %></span>
+            <% }) %>
+            <% if (team.canViewOnly) { %><span class="viewer-badge">Този канал е споделен към теб само за преглед</span><% } %>
+          </div>
+        </div>
+
+        <div class="member-grid" style="margin-top:16px">
+          <% team.players.forEach(function(player){ %>
+            <div class="member-card">
+              <strong><%= player.name %></strong>
+              <span><%= player.email %></span>
+            </div>
+          <% }) %>
+        </div>
+
+        <% if (currentUser.role === 'coach' && team.canManage) { %>
+          <div class="split" style="margin-top:18px">
+            <div class="inner-card">
+              <h3>Покани дете</h3>
+              <form method="post" action="/teams/<%= team.id %>/invite-player" class="stack">
+                <input type="email" name="email" placeholder="email на дете" required />
+                <button class="btn btn-primary" type="submit">Добави дете в канала</button>
+              </form>
+            </div>
+            <div class="inner-card">
+              <h3>Покани треньор</h3>
+              <form method="post" action="/teams/<%= team.id %>/invite-coach" class="stack">
+                <input type="email" name="email" placeholder="email на треньор" required />
+                <button class="btn btn-secondary" type="submit">Сподели канал за преглед</button>
+              </form>
+            </div>
+          </div>
+
+          <div class="inner-card" style="margin-top:18px">
+            <h3>Ново дневно предизвикателство</h3>
+            <form method="post" action="/teams/<%= team.id %>/nominate" class="stack">
+              <label>Избери дете
+                <select name="assignedPlayerId" required>
+                  <option value="">Избери</option>
+                  <% team.players.forEach(function(player){ %>
+                    <option value="<%= player.id %>"><%= player.name %></option>
+                  <% }) %>
+                </select>
+              </label>
+              <input type="text" name="title" placeholder="Заглавие на задачата" required />
+              <textarea name="description" placeholder="Опиши дрибъл, финтове, удари, жонглиране..."></textarea>
+              <button class="btn btn-primary" type="submit">Номинирай дете за днешното предизвикателство</button>
+            </form>
+          </div>
+        <% } %>
+      </section>
+
+      <section class="panel glass">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Предизвикателство</div>
+            <h2><%= team.activeChallenge ? team.activeChallenge.title : 'Още няма активно предизвикателство' %></h2>
+            <% if (team.activeChallenge) { %><p><%= team.activeChallenge.description || 'Няма допълнително описание.' %></p><% } %>
+          </div>
+          <% if (team.activeChallenge && team.activeChallenge.mainUploadedAt) { %>
+            <div class="timer-card">
+              <span>Остава за отговор:</span>
+              <strong class="countdown" data-target="<%= team.activeChallenge.responsesDueAt %>">--:--:--</strong>
+            </div>
+          <% } %>
+        </div>
+
+        <% if (!team.activeChallenge) { %>
+          <div class="empty">Все още няма създадено предизвикателство в този канал.</div>
+        <% } else { %>
+          <div class="challenge-meta">
+            <span class="pill">Номинирано дете: <%= users.find(u => u.id === team.activeChallenge.assignedPlayerId).name %></span>
+            <span class="pill">Създадено: <%= new Date(team.activeChallenge.createdAt).toLocaleString('bg-BG') %></span>
+            <span class="pill">Оценяване: треньор + средна анонимна оценка от децата</span>
+          </div>
+
+          <div class="video-stage">
+            <div class="video-card">
+              <div class="video-card-head">
+                <h3>Основно видео</h3>
+                <span class="score-tag">Общо: <%= challengeStats ? challengeStats.mainTotalScore.toFixed(1) : '0.0' %></span>
+              </div>
+              <% if (team.activeChallenge.mainVideoPath) { %>
+                <video controls preload="metadata" src="<%= team.activeChallenge.mainVideoPath %>"></video>
+                <div class="score-grid">
+                  <div><span>Треньор</span><strong><%= challengeStats.mainCoachScore.toFixed(1) %></strong></div>
+                  <div><span>Деца средно</span><strong><%= challengeStats.mainPeerScore.toFixed(1) %></strong></div>
+                </div>
+              <% } else { %>
+                <div class="empty">Чакаме номинираното дете да качи основното видео.</div>
+              <% } %>
+
+              <% if (currentUser.role === 'player' && currentUser.id === team.activeChallenge.assignedPlayerId && !team.activeChallenge.mainVideoPath) { %>
+                <form method="post" enctype="multipart/form-data" action="/challenges/<%= team.activeChallenge.id %>/main-upload" class="stack upload-box">
+                  <label>Качи основното видео<input type="file" name="video" accept="video/*" required /></label>
+                  <button class="btn btn-primary" type="submit">Качи видео</button>
+                </form>
+              <% } %>
+
+              <% if (currentUser.role === 'coach' && team.canManage && team.activeChallenge.mainVideoPath) { %>
+                <form method="post" action="/challenges/<%= team.activeChallenge.id %>/coach-rate" class="inline-rate">
+                  <input type="hidden" name="targetType" value="main" />
+                  <input type="hidden" name="targetId" value="<%= team.activeChallenge.assignedPlayerId %>" />
+                  <select name="value" required>
+                    <option value="">Оценка на треньора</option>
+                    <% for (let i = 1; i <= 10; i++) { %><option value="<%= i %>"><%= i %></option><% } %>
+                  </select>
+                  <button class="btn btn-primary" type="submit">Запази</button>
+                </form>
+              <% } %>
+
+              <% if (currentUser.role === 'player' && team.activeChallenge.mainVideoPath && currentUser.id !== team.activeChallenge.assignedPlayerId) { %>
+                <form method="post" action="/challenges/<%= team.activeChallenge.id %>/peer-rate" class="inline-rate">
+                  <input type="hidden" name="targetType" value="main" />
+                  <input type="hidden" name="targetId" value="<%= team.activeChallenge.assignedPlayerId %>" />
+                  <input type="hidden" name="targetPlayerId" value="<%= team.activeChallenge.assignedPlayerId %>" />
+                  <select name="value" required>
+                    <option value="">Твоя анонимна оценка</option>
+                    <% for (let i = 1; i <= 10; i++) { %><option value="<%= i %>"><%= i %></option><% } %>
+                  </select>
+                  <button class="btn btn-secondary" type="submit">Оцени анонимно</button>
+                </form>
+              <% } %>
+            </div>
+
+            <div class="video-card">
+              <div class="responses-head">
+                <h3>Видео отговори</h3>
+                <span><%= team.activeChallenge.responses.length %> качени</span>
+              </div>
+
+              <% if (currentUser.role === 'player' && team.activeChallenge.mainVideoPath && currentUser.id !== team.activeChallenge.assignedPlayerId) { %>
+                <form method="post" enctype="multipart/form-data" action="/challenges/<%= team.activeChallenge.id %>/respond" class="stack upload-box">
+                  <label>Качи твоя видео отговор<input type="file" name="video" accept="video/*" required /></label>
+                  <button class="btn btn-primary" type="submit">Качи отговор</button>
+                </form>
+              <% } %>
+
+              <% if (team.activeChallenge.responses.length === 0) { %>
+                <div class="empty">Още няма качени отговори.</div>
+              <% } %>
+
+              <% team.activeChallenge.responses.forEach(function(resp){ const player = users.find(u => u.id === resp.playerId); const respStats = challengeStats.responseStats.find(r => r.id === resp.id); %>
+                <div class="video-card" style="margin-top:14px">
+                  <div class="video-card-head">
+                    <h4><%= player.name %></h4>
+                    <span class="score-tag">Общо: <%= respStats ? respStats.totalScore.toFixed(1) : '0.0' %></span>
+                  </div>
+                  <video controls preload="metadata" src="<%= resp.videoPath %>"></video>
+                  <div class="score-grid">
+                    <div><span>Треньор</span><strong><%= respStats ? respStats.coachScore.toFixed(1) : '0.0' %></strong></div>
+                    <div><span>Деца средно</span><strong><%= respStats ? respStats.peerScore.toFixed(1) : '0.0' %></strong></div>
+                  </div>
+
+                  <% if (currentUser.role === 'coach' && team.canManage) { %>
+                    <form method="post" action="/challenges/<%= team.activeChallenge.id %>/coach-rate" class="inline-rate">
+                      <input type="hidden" name="targetType" value="response" />
+                      <input type="hidden" name="targetId" value="<%= resp.id %>" />
+                      <select name="value" required>
+                        <option value="">Оценка на треньора</option>
+                        <% for (let i = 1; i <= 10; i++) { %><option value="<%= i %>"><%= i %></option><% } %>
+                      </select>
+                      <button class="btn btn-primary" type="submit">Запази</button>
+                    </form>
+                  <% } %>
+
+                  <% if (currentUser.role === 'player' && currentUser.id !== resp.playerId) { %>
+                    <form method="post" action="/challenges/<%= team.activeChallenge.id %>/peer-rate" class="inline-rate">
+                      <input type="hidden" name="targetType" value="response" />
+                      <input type="hidden" name="targetId" value="<%= resp.id %>" />
+                      <input type="hidden" name="targetPlayerId" value="<%= resp.playerId %>" />
+                      <select name="value" required>
+                        <option value="">Твоя анонимна оценка</option>
+                        <% for (let i = 1; i <= 10; i++) { %><option value="<%= i %>"><%= i %></option><% } %>
+                      </select>
+                      <button class="btn btn-secondary" type="submit">Оцени анонимно</button>
+                    </form>
+                  <% } %>
+                </div>
+              <% }) %>
+            </div>
+          </div>
+        <% } %>
+      </section>
+    <% } %>
+  </main>
+</div>
+<%- include('partials/footer') %>

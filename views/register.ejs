@@ -1,0 +1,28 @@
+<%- include('partials/header', { title: 'Регистрация | СК Болярчета' }) %>
+<div class="auth-shell">
+  <div class="brand-panel">
+    <div class="brand-copy">
+      <span class="club-mark">СК "Болярчета"</span>
+      <h1>Създай профил като играч или треньор</h1>
+      <p>Треньорът вижда само каналите, които е създал, плюс тези, в които е поканен от друг треньор. Само създателят на канал може да дава предизвикателства и да оценява като треньор.</p>
+    </div>
+  </div>
+  <div class="auth-card glass">
+    <h2>Регистрация</h2>
+    <% if (flash) { %><div class="flash <%= flash.type %>" style="width:100%;margin:0 0 16px"><%= flash.message %></div><% } %>
+    <form method="post" action="/register" class="stack">
+      <label>Име<input type="text" name="name" required /></label>
+      <label>Имейл<input type="email" name="email" required /></label>
+      <label>Парола<input type="password" name="password" required /></label>
+      <label>Роля
+        <select name="role" required>
+          <option value="player">Играч</option>
+          <option value="coach">Треньор</option>
+        </select>
+      </label>
+      <button class="btn btn-primary" type="submit">Създай акаунт</button>
+    </form>
+    <div class="auth-links">Имаш акаунт? <a href="/login">Вход</a></div>
+  </div>
+</div>
+<%- include('partials/footer') %>
