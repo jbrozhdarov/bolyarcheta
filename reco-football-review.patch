@@ -1,4 +1,4 @@
-From cecda958d041be105697986bd41a3140216c125e Mon Sep 17 00:00:00 2001
+From ee7579215005237e89c2e6174d508c353a760b25 Mon Sep 17 00:00:00 2001
 From: Codex <codex@openai.com>
 Date: Wed, 2 Sep 2026 22:43:16 +0300
 Subject: [PATCH] feat(gui): add reviewable football AI camera path
@@ -9,13 +9,13 @@ Subject: [PATCH] feat(gui): add reviewable football AI camera path
  Cargo.lock                                  |   2 +-
  crates/reco-gui/Cargo.toml                  |   2 +-
  crates/reco-gui/src/export.rs               |  38 +-
- crates/reco-gui/src/main.rs                 | 652 +++++++++++++++++++-
+ crates/reco-gui/src/main.rs                 | 666 +++++++++++++++++++-
  crates/reco-gui/src/review.rs               | 570 +++++++++++++++++
  crates/reco-gui/ui/main.slint               | 261 +++++++-
  crates/reco-io/src/ffmpeg/calibration_io.rs |  30 +-
  crates/reco-io/src/stitch_job.rs            |  19 +-
  docs/FOOTBALL_REVIEW_BG.md                  |  62 ++
- 11 files changed, 1621 insertions(+), 20 deletions(-)
+ 11 files changed, 1635 insertions(+), 20 deletions(-)
  create mode 100644 crates/reco-gui/src/review.rs
  create mode 100644 docs/FOOTBALL_REVIEW_BG.md
 
@@ -154,7 +154,7 @@ index 4b78b695ca5bedc011785bd2e1164156f0505510..66bc99ca887103fdfbf8cf9cbc269f09
      }
      #[cfg(not(feature = "autocam"))]
 diff --git a/crates/reco-gui/src/main.rs b/crates/reco-gui/src/main.rs
-index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467f65b72b1 100644
+index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe7326ed30874 100644
 --- a/crates/reco-gui/src/main.rs
 +++ b/crates/reco-gui/src/main.rs
 @@ -18,6 +18,7 @@
@@ -217,7 +217,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
      /// Original PlaneLayout values — what auto-calibrate produced. Live
      /// calibration sliders edit relative to this so Reset restores.
      cal_baseline_layout: Option<reco_core::calibration::PlaneLayout>,
-@@ -494,6 +526,10 @@ impl AppState {
+@@ -494,11 +526,29 @@ impl AppState {
              export_last_progress_at: Arc::new(Mutex::new(None)),
              export_thread: None,
              export_rx: None,
@@ -228,7 +228,26 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
              cal_baseline_layout: None,
              user_settings: {
                  let mut s = crate::settings::GuiSettings::load();
-@@ -521,6 +557,81 @@ impl AppState {
++                let mut changed = false;
++                let bundled_model = std::env::current_exe()
++                    .ok()
++                    .and_then(|exe| exe.parent().map(|dir| dir.join("yolo26n.onnx")))
++                    .filter(|path| path.is_file());
++                if s.ai_model_path.as_ref().is_none_or(|path| !path.is_file())
++                    && let Some(model) = bundled_model
++                {
++                    s.ai_model_path = Some(model);
++                    changed = true;
++                }
+                 if s.telemetry_client_id.is_none() {
+                     s.telemetry_client_id = Some(uuid::Uuid::new_v4().to_string());
++                    changed = true;
++                }
++                if changed {
+                     s.save();
+                 }
+                 s
+@@ -521,6 +571,81 @@ impl AppState {
          self.export_thread.is_some()
      }
  
@@ -310,7 +329,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
      fn reset_pipeline(&mut self) {
          self.bridge = None;
          self.playback = Playback::new();
-@@ -849,6 +960,9 @@ impl AppState {
+@@ -849,6 +974,9 @@ impl AppState {
      /// then runs the coverage clamp so the resulting target stays
      /// inside the no-black region.
      fn apply_pan(&mut self, dx_px: f32, dy_px: f32) {
@@ -320,7 +339,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
          self.pose.apply_drag(dx_px, dy_px);
          self.clamp_targets();
          // Flag dirty so the playback timer requests redraws until the
-@@ -860,6 +974,9 @@ impl AppState {
+@@ -860,6 +988,9 @@ impl AppState {
  
      /// Apply a FOV delta (degrees). Clamps the target; tick handles smoothing.
      fn apply_zoom(&mut self, delta_deg: f32) {
@@ -330,7 +349,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
          IntentTranslator::new(&mut self.pose)
              .dispatch(ControlIntent::Pose(PoseIntent::DeltaFovDeg(delta_deg)));
          self.clamp_targets();
-@@ -868,6 +985,9 @@ impl AppState {
+@@ -868,6 +999,9 @@ impl AppState {
  
      /// Set FOV absolute (from the slider). Updates target; tick applies it.
      fn set_fov(&mut self, fov_deg: f32) {
@@ -340,7 +359,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
          IntentTranslator::new(&mut self.pose)
              .dispatch(ControlIntent::Pose(PoseIntent::SetFovDeg(fov_deg)));
          self.clamp_targets();
-@@ -1212,6 +1332,49 @@ fn sync_roi_points(state: &AppState, app: &RecoApp) {
+@@ -1212,6 +1346,49 @@ fn sync_roi_points(state: &AppState, app: &RecoApp) {
      app.set_roi_points_y(slint::ModelRc::new(slint::VecModel::from(ys)));
  }
  
@@ -390,7 +409,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
  /// Install the standard tracing subscriber + log bridge.
  ///
  /// Replaces the previous `env_logger::init()`. Bridges `log::*` calls
-@@ -2645,6 +2808,9 @@ fn main() -> anyhow::Result<()> {
+@@ -2645,6 +2822,9 @@ fn main() -> anyhow::Result<()> {
          }
          match s.playback.step_forward() {
              Ok(true) => {
@@ -400,7 +419,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
                  let img = s.render_current();
                  if let (Some(app), Some(img)) = (app_weak.upgrade(), img) {
                      app.set_preview_frame(img);
-@@ -2677,6 +2843,9 @@ fn main() -> anyhow::Result<()> {
+@@ -2677,6 +2857,9 @@ fn main() -> anyhow::Result<()> {
          let fraction = target as f32 / total as f32;
          match s.playback.seek(fraction) {
              Ok(()) => {
@@ -410,7 +429,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
                  let img = s.render_current();
                  if let (Some(app), Some(img)) = (app_weak.upgrade(), img) {
                      app.set_preview_frame(img);
-@@ -2731,13 +2900,27 @@ fn main() -> anyhow::Result<()> {
+@@ -2731,13 +2914,27 @@ fn main() -> anyhow::Result<()> {
      //      jumps from raw input events
  
      let state_ref = Rc::clone(&state);
@@ -440,7 +459,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
      });
  
      let state_ref = Rc::clone(&state);
-@@ -2784,8 +2967,15 @@ fn main() -> anyhow::Result<()> {
+@@ -2784,8 +2981,15 @@ fn main() -> anyhow::Result<()> {
      });
  
      let state_ref = Rc::clone(&state);
@@ -457,7 +476,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
      });
  
      let app_weak = app.as_weak();
-@@ -2796,6 +2986,9 @@ fn main() -> anyhow::Result<()> {
+@@ -2796,6 +3000,9 @@ fn main() -> anyhow::Result<()> {
              log::error!("Seek relative error: {e}");
              return;
          }
@@ -467,7 +486,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
          let img = s.render_current();
          if let (Some(app), Some(img)) = (app_weak.upgrade(), img) {
              app.set_preview_frame(img);
-@@ -3287,6 +3480,172 @@ fn main() -> anyhow::Result<()> {
+@@ -3287,6 +3494,172 @@ fn main() -> anyhow::Result<()> {
          }
      });
  
@@ -640,7 +659,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
      // ── Export dialog callbacks ──
      //
      // "Open" populates default values from current state (blend width
-@@ -3387,6 +3746,160 @@ fn main() -> anyhow::Result<()> {
+@@ -3387,6 +3760,160 @@ fn main() -> anyhow::Result<()> {
          let _ = (&app_weak, &name);
      });
  
@@ -801,7 +820,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
      let app_weak = app.as_weak();
      let state_ref = Rc::clone(&state);
      app.on_start_export(move || {
-@@ -3451,6 +3964,41 @@ fn main() -> anyhow::Result<()> {
+@@ -3451,6 +3978,41 @@ fn main() -> anyhow::Result<()> {
          let start_secs = app.get_export_start_secs();
          let end_secs = app.get_export_end_secs();
          log::info!("Export range: start={start_secs:.1}s, end={end_secs:.1}s");
@@ -843,7 +862,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
          let autocam = crate::export::AutocamUiConfig {
              enabled: app.get_export_autocam_enabled(),
              model_path: app.get_export_model_path().to_string(),
-@@ -3467,6 +4015,7 @@ fn main() -> anyhow::Result<()> {
+@@ -3467,6 +4029,7 @@ fn main() -> anyhow::Result<()> {
              fov_tight: app.get_export_fov_tight(),
              fov_wide: app.get_export_fov_wide(),
              fov_default: app.get_export_fov_default(),
@@ -851,7 +870,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
          };
          let replay_enabled = app.get_export_replay_enabled();
          let events_enabled = app.get_export_events_enabled();
-@@ -3487,6 +4036,7 @@ fn main() -> anyhow::Result<()> {
+@@ -3487,6 +4050,7 @@ fn main() -> anyhow::Result<()> {
  
          // Reset cancel flag, start a fresh channel for completion.
          s.export_interrupted.store(false, Ordering::Relaxed);
@@ -859,7 +878,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
          let interrupted = Arc::clone(&s.export_interrupted);
          let (tx, rx) = std::sync::mpsc::channel();
          s.export_rx = Some(rx);
-@@ -3725,6 +4275,8 @@ fn main() -> anyhow::Result<()> {
+@@ -3725,6 +4289,8 @@ fn main() -> anyhow::Result<()> {
                  && let Ok(outcome) = rx.try_recv()
              {
                  s.export_rx = None;
@@ -868,7 +887,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
                  if let Some(h) = s.export_thread.take() {
                      let _ = h.join();
                  }
-@@ -3744,6 +4296,72 @@ fn main() -> anyhow::Result<()> {
+@@ -3744,6 +4310,72 @@ fn main() -> anyhow::Result<()> {
                      app.set_export_progress(0.0);
                      match outcome {
                          ExportOutcome::Ok(frames, path) => {
@@ -941,7 +960,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
                              app.set_export_status_text("".into());
                              app.set_status_text(
                                  format!("Export complete: {frames} frames -> {}", path.display(),)
-@@ -3811,7 +4429,14 @@ fn main() -> anyhow::Result<()> {
+@@ -3811,7 +4443,14 @@ fn main() -> anyhow::Result<()> {
                          }
                          ExportOutcome::Cancelled => {
                              app.set_export_status_text("".into());
@@ -957,7 +976,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
                              #[cfg(feature = "automation")]
                              if s.auto_export_mode {
                                  log::warn!(
-@@ -3849,6 +4474,14 @@ fn main() -> anyhow::Result<()> {
+@@ -3849,6 +4488,14 @@ fn main() -> anyhow::Result<()> {
                                      format!("{other}"),
                                  ),
                              };
@@ -972,7 +991,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
                              // Build the detailed status now (body is moved into
                              // the toast below) and apply it AFTER sync_to_ui,
                              // whose status-bar fallback would otherwise replace
-@@ -3956,6 +4589,9 @@ fn main() -> anyhow::Result<()> {
+@@ -3956,6 +4603,9 @@ fn main() -> anyhow::Result<()> {
                  s.pending_seek = None;
                  match s.playback.seek(frac) {
                      Ok(()) => {
@@ -982,7 +1001,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
                          let img = s.render_current();
                          if let (Some(app), Some(img)) = (app_weak.upgrade(), img) {
                              app.set_preview_frame(img);
-@@ -4022,7 +4658,6 @@ fn vsync_render_tick(state: &Rc<RefCell<AppState>>, app_weak: &slint::Weak<RecoA
+@@ -4022,7 +4672,6 @@ fn vsync_render_tick(state: &Rc<RefCell<AppState>>, app_weak: &slint::Weak<RecoA
          }
      }
  
@@ -990,7 +1009,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..95d0009d720c873baa050f2344e16467
      let video_advanced = match s.playback.tick() {
          Ok(advanced) => advanced,
          Err(e) => {
-@@ -4033,9 +4668,14 @@ fn vsync_render_tick(state: &Rc<RefCell<AppState>>, app_weak: &slint::Weak<RecoA
+@@ -4033,9 +4682,14 @@ fn vsync_render_tick(state: &Rc<RefCell<AppState>>, app_weak: &slint::Weak<RecoA
              false
          }
      };
