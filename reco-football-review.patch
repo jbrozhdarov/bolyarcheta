@@ -1,4 +1,4 @@
-From ee7579215005237e89c2e6174d508c353a760b25 Mon Sep 17 00:00:00 2001
+From c31e8670352f2f11a54ddb1d2c318d6667507097 Mon Sep 17 00:00:00 2001
 From: Codex <codex@openai.com>
 Date: Wed, 2 Sep 2026 22:43:16 +0300
 Subject: [PATCH] feat(gui): add reviewable football AI camera path
@@ -7,15 +7,16 @@ Subject: [PATCH] feat(gui): add reviewable football AI camera path
  .github/workflows/release.yml               |   2 +
  .github/workflows/test-build-gui.yml        |   3 +
  Cargo.lock                                  |   2 +-
+ crates/reco-core/src/lens/rig_correction.rs |  92 ++-
  crates/reco-gui/Cargo.toml                  |   2 +-
  crates/reco-gui/src/export.rs               |  38 +-
- crates/reco-gui/src/main.rs                 | 666 +++++++++++++++++++-
- crates/reco-gui/src/review.rs               | 570 +++++++++++++++++
- crates/reco-gui/ui/main.slint               | 261 +++++++-
+ crates/reco-gui/src/main.rs                 | 713 +++++++++++++++++++-
+ crates/reco-gui/src/review.rs               | 570 ++++++++++++++++
+ crates/reco-gui/ui/main.slint               | 261 ++++++-
  crates/reco-io/src/ffmpeg/calibration_io.rs |  30 +-
  crates/reco-io/src/stitch_job.rs            |  19 +-
  docs/FOOTBALL_REVIEW_BG.md                  |  62 ++
- 11 files changed, 1635 insertions(+), 20 deletions(-)
+ 12 files changed, 1763 insertions(+), 31 deletions(-)
  create mode 100644 crates/reco-gui/src/review.rs
  create mode 100644 docs/FOOTBALL_REVIEW_BG.md
 
@@ -66,6 +67,134 @@ index 00912a946040fcb68e942652401971c2c1a17a40..344271f3df9ff07b3df16dbffc4230fa
  dependencies = [
   "anyhow",
   "arboard",
+diff --git a/crates/reco-core/src/lens/rig_correction.rs b/crates/reco-core/src/lens/rig_correction.rs
+index ad4edc820cfc1e039d3ffa93857170abeff39170..2abb86b3a1f137c9b9214fcd1c810949c0dff022 100644
+--- a/crates/reco-core/src/lens/rig_correction.rs
++++ b/crates/reco-core/src/lens/rig_correction.rs
+@@ -90,9 +90,73 @@ pub(crate) fn world_to_render_pose(
+     let world_dir = cam.yaw_pitch_to_direction(world_yaw, world_pitch);
+ 
+     // 2. Build the same tilt+roll quaternion that view_matrix applies.
++    let combined_q = rig_rotation(cam, rig_tilt, rig_roll);
++
++    // 3. Invert: the un-tilted direction that view_matrix's
++    //    tilt rotation will map to world_dir.
++    let render_dir = combined_q.inverse() * world_dir;
++
++    // 4. Decompose using the un-tilted camera basis.
++    let pos = cam.direction_to_yaw_pitch(&render_dir);
++    (pos.yaw, pos.pitch)
++}
++
++/// Convert a world-space panner pose to the user-space pose consumed by
++/// [`reco-control`](https://docs.rs/reco-control) style camera controls.
++///
++/// Applying [`render_pitch`] to the returned pose reproduces the exact
++/// renderer pose, including the yaw change introduced by rig roll. This is
++/// useful for reviewing an AI panner path in the interactive GUI without
++/// applying rig correction twice.
++pub fn world_to_user_pose(
++    camera_position: &[f32; 3],
++    world_yaw: f32,
++    world_pitch: f32,
++    rig_tilt: f32,
++    rig_roll: f32,
++) -> (f32, f32) {
++    let cam = VirtualCamera::new(camera_position);
++    let (render_yaw, rendered_pitch) =
++        world_to_render_pose(&cam, world_yaw, world_pitch, rig_tilt, rig_roll);
++    let user_pitch = if rig_tilt.abs() < 1e-6 {
++        rendered_pitch
++    } else {
++        rendered_pitch + (render_yaw.cos() * rig_tilt.tan()).atan()
++    };
++    (render_yaw, user_pitch)
++}
++
++/// Convert an interactive user-space camera pose back to the world-space
++/// coordinates expected by AI panners and [`StitchSession`](crate::session::StitchSession).
++///
++/// This is the inverse of [`world_to_user_pose`] up to floating-point error.
++/// It allows manual review keyframes to pass through the normal production
++/// coverage clamp and rig correction exactly once during final export.
++pub fn user_to_world_pose(
++    camera_position: &[f32; 3],
++    user_yaw: f32,
++    user_pitch: f32,
++    rig_tilt: f32,
++    rig_roll: f32,
++) -> (f32, f32) {
++    if rig_tilt.abs() < 1e-6 && rig_roll.abs() < 1e-6 {
++        return (user_yaw, user_pitch);
++    }
++    let cam = VirtualCamera::new(camera_position);
++    let rendered_pitch = render_pitch(user_yaw, user_pitch, rig_tilt);
++    let render_dir = cam.yaw_pitch_to_direction(user_yaw, rendered_pitch);
++    let world_dir = rig_rotation(&cam, rig_tilt, rig_roll) * render_dir;
++    let pos = cam.direction_to_yaw_pitch(&world_dir);
++    (pos.yaw, pos.pitch)
++}
++
++fn rig_rotation(
++    cam: &VirtualCamera,
++    rig_tilt: f32,
++    rig_roll: f32,
++) -> nalgebra::UnitQuaternion<f32> {
+     let base_right = cam.base_right;
+     let mut base_forward = cam.base_forward;
+-    let mut world_up = VirtualCamera::world_up();
+ 
+     let mut combined_q = nalgebra::UnitQuaternion::identity();
+     if rig_tilt.abs() > 1e-6 {
+@@ -101,7 +165,6 @@ pub(crate) fn world_to_render_pose(
+             rig_tilt,
+         );
+         base_forward = tilt_q * base_forward;
+-        world_up = tilt_q * world_up;
+         combined_q = tilt_q;
+     }
+     if rig_roll.abs() > 1e-6 {
+@@ -109,17 +172,9 @@ pub(crate) fn world_to_render_pose(
+             &nalgebra::Unit::new_normalize(base_forward),
+             -rig_roll,
+         );
+-        let _ = roll_q * world_up;
+         combined_q = roll_q * combined_q;
+     }
+-
+-    // 3. Invert: the un-tilted direction that view_matrix's
+-    //    tilt rotation will map to world_dir.
+-    let render_dir = combined_q.inverse() * world_dir;
+-
+-    // 4. Decompose using the un-tilted camera basis.
+-    let pos = cam.direction_to_yaw_pitch(&render_dir);
+-    (pos.yaw, pos.pitch)
++    combined_q
+ }
+ 
+ #[cfg(test)]
+@@ -152,6 +207,21 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn user_world_round_trip_handles_tilt_and_roll() {
++        let camera_position = [0.2, 0.0, 0.2];
++        let tilt = 0.18;
++        let roll = -0.07;
++        for (yaw, pitch) in [(-0.7, -0.1), (0.0, 0.0), (0.6, 0.14)] {
++            let (world_yaw, world_pitch) =
++                user_to_world_pose(&camera_position, yaw, pitch, tilt, roll);
++            let (round_yaw, round_pitch) =
++                world_to_user_pose(&camera_position, world_yaw, world_pitch, tilt, roll);
++            assert!((round_yaw - yaw).abs() < 1e-5);
++            assert!((round_pitch - pitch).abs() < 1e-5);
++        }
++    }
++
+     #[test]
+     fn render_pitch_no_compensation_at_yaw_90() {
+         let tilt = 0.15_f32;
 diff --git a/crates/reco-gui/Cargo.toml b/crates/reco-gui/Cargo.toml
 index be63c142b0198e10e24eb9661994969337bb2542..cc9dcbadf96d3c01d6e460fbc265437634efca4a 100644
 --- a/crates/reco-gui/Cargo.toml
@@ -154,7 +283,7 @@ index 4b78b695ca5bedc011785bd2e1164156f0505510..66bc99ca887103fdfbf8cf9cbc269f09
      }
      #[cfg(not(feature = "autocam"))]
 diff --git a/crates/reco-gui/src/main.rs b/crates/reco-gui/src/main.rs
-index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe7326ed30874 100644
+index 65a69d3ab865dd21e475965359a6711928e8b537..4101ef9bf761274dbedd2c85c6713031babe3ea7 100644
 --- a/crates/reco-gui/src/main.rs
 +++ b/crates/reco-gui/src/main.rs
 @@ -18,6 +18,7 @@
@@ -165,7 +294,12 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
  mod settings;
  mod telemetry_client;
  mod toast;
-@@ -39,6 +40,7 @@ use reco_core::wgpu;
+@@ -35,10 +36,12 @@ use reco_control::pose_control::{PoseControl, PoseControlConfig};
+ use reco_control::{ControlIntent, IntentTranslator, PoseIntent};
+ use reco_core::calibration::MatchCalibration;
+ use reco_core::detect::director::ViewportPosition;
++use reco_core::render::scene::SceneGeometry;
+ use reco_core::wgpu;
  
  use crate::playback::{PlayState, Playback};
  use crate::preview::PreviewBridge;
@@ -173,7 +307,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
  use crate::toast::{Severity, ToastManager};
  
  /// wgpu handles captured from Slint's rendering notifier. Populated once
-@@ -109,6 +111,24 @@ struct CalibrationOutput {
+@@ -109,6 +112,24 @@ struct CalibrationOutput {
  /// `Io(...)`, etc.) instead of parsing a stringified message.
  type CalibrationResult = Result<CalibrationOutput, reco_calibrate::video::CalibrateVideosError>;
  
@@ -198,7 +332,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
  /// Headless dev/test preload hook. When `RECO_AUTOLOAD` is set the GUI loads
  /// the given left/right videos and calibration on startup (and optionally
  /// starts an export via `RECO_AUTOEXPORT`), so the app can be driven under
-@@ -258,6 +278,18 @@ struct AppState {
+@@ -258,6 +279,18 @@ struct AppState {
      export_thread: Option<std::thread::JoinHandle<()>>,
      /// Receives export completion notifications from the worker.
      export_rx: Option<std::sync::mpsc::Receiver<ExportOutcome>>,
@@ -217,7 +351,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
      /// Original PlaneLayout values — what auto-calibrate produced. Live
      /// calibration sliders edit relative to this so Reset restores.
      cal_baseline_layout: Option<reco_core::calibration::PlaneLayout>,
-@@ -494,11 +526,29 @@ impl AppState {
+@@ -494,11 +527,29 @@ impl AppState {
              export_last_progress_at: Arc::new(Mutex::new(None)),
              export_thread: None,
              export_rx: None,
@@ -247,7 +381,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
                      s.save();
                  }
                  s
-@@ -521,6 +571,81 @@ impl AppState {
+@@ -521,6 +572,127 @@ impl AppState {
          self.export_thread.is_some()
      }
  
@@ -256,13 +390,14 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
 +            return false;
 +        }
 +        let frame = self.playback.frame_index();
-+        let Some(pose) = self
++        let Some(world_pose) = self
 +            .review_project
 +            .as_ref()
 +            .and_then(|project| project.corrected_pose_at(frame))
 +        else {
 +            return false;
 +        };
++        let pose = self.review_world_to_user_pose(world_pose);
 +        let previous = self.pose.target_pose();
 +        self.pose.set_target(pose);
 +        (previous.yaw - pose.yaw).abs() > f32::EPSILON
@@ -277,7 +412,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
 +        let frame = self.playback.frame_index();
 +        // The target is the exact view selected by the drag/zoom controls;
 +        // `current_pose` may still be a few smoothing ticks behind it.
-+        let pose = self.pose.target_pose();
++        let pose = self.review_user_to_world_pose(self.pose.target_pose());
 +        let project = self
 +            .review_project
 +            .as_mut()
@@ -285,6 +420,51 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
 +        project.add_keyframe(frame, pose);
 +        self.review_follow_enabled = true;
 +        self.save_review_project()
++    }
++
++    fn review_camera(&self) -> Option<([f32; 3], f32, f32)> {
++        let pipeline = self.bridge.as_ref()?.renderer().pipeline();
++        let calibration = pipeline.calibration();
++        let aspect = calibration.left.width as f32 / calibration.left.height.max(1) as f32;
++        let scene = SceneGeometry::from_layout_with_aspect(&calibration.layout, aspect);
++        let viewport = pipeline.viewport();
++        Some((scene.camera_position, viewport.rig_tilt, viewport.rig_roll))
++    }
++
++    fn review_world_to_user_pose(&self, pose: ViewportPosition) -> ViewportPosition {
++        let Some((camera_position, rig_tilt, rig_roll)) = self.review_camera() else {
++            return pose;
++        };
++        let (yaw, pitch) = reco_core::lens::rig_correction::world_to_user_pose(
++            &camera_position,
++            pose.yaw,
++            pose.pitch,
++            rig_tilt,
++            rig_roll,
++        );
++        ViewportPosition {
++            yaw,
++            pitch,
++            fov_degrees: pose.fov_degrees,
++        }
++    }
++
++    fn review_user_to_world_pose(&self, pose: ViewportPosition) -> ViewportPosition {
++        let Some((camera_position, rig_tilt, rig_roll)) = self.review_camera() else {
++            return pose;
++        };
++        let (yaw, pitch) = reco_core::lens::rig_correction::user_to_world_pose(
++            &camera_position,
++            pose.yaw,
++            pose.pitch,
++            rig_tilt,
++            rig_roll,
++        );
++        ViewportPosition {
++            yaw,
++            pitch,
++            fov_degrees: pose.fov_degrees,
++        }
 +    }
 +
 +    fn remove_review_keyframe(&mut self) -> Result<bool, String> {
@@ -329,7 +509,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
      fn reset_pipeline(&mut self) {
          self.bridge = None;
          self.playback = Playback::new();
-@@ -849,6 +974,9 @@ impl AppState {
+@@ -849,6 +1021,9 @@ impl AppState {
      /// then runs the coverage clamp so the resulting target stays
      /// inside the no-black region.
      fn apply_pan(&mut self, dx_px: f32, dy_px: f32) {
@@ -339,7 +519,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
          self.pose.apply_drag(dx_px, dy_px);
          self.clamp_targets();
          // Flag dirty so the playback timer requests redraws until the
-@@ -860,6 +988,9 @@ impl AppState {
+@@ -860,6 +1035,9 @@ impl AppState {
  
      /// Apply a FOV delta (degrees). Clamps the target; tick handles smoothing.
      fn apply_zoom(&mut self, delta_deg: f32) {
@@ -349,7 +529,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
          IntentTranslator::new(&mut self.pose)
              .dispatch(ControlIntent::Pose(PoseIntent::DeltaFovDeg(delta_deg)));
          self.clamp_targets();
-@@ -868,6 +999,9 @@ impl AppState {
+@@ -868,6 +1046,9 @@ impl AppState {
  
      /// Set FOV absolute (from the slider). Updates target; tick applies it.
      fn set_fov(&mut self, fov_deg: f32) {
@@ -359,7 +539,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
          IntentTranslator::new(&mut self.pose)
              .dispatch(ControlIntent::Pose(PoseIntent::SetFovDeg(fov_deg)));
          self.clamp_targets();
-@@ -1212,6 +1346,49 @@ fn sync_roi_points(state: &AppState, app: &RecoApp) {
+@@ -1212,6 +1393,49 @@ fn sync_roi_points(state: &AppState, app: &RecoApp) {
      app.set_roi_points_y(slint::ModelRc::new(slint::VecModel::from(ys)));
  }
  
@@ -409,7 +589,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
  /// Install the standard tracing subscriber + log bridge.
  ///
  /// Replaces the previous `env_logger::init()`. Bridges `log::*` calls
-@@ -2645,6 +2822,9 @@ fn main() -> anyhow::Result<()> {
+@@ -2645,6 +2869,9 @@ fn main() -> anyhow::Result<()> {
          }
          match s.playback.step_forward() {
              Ok(true) => {
@@ -419,7 +599,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
                  let img = s.render_current();
                  if let (Some(app), Some(img)) = (app_weak.upgrade(), img) {
                      app.set_preview_frame(img);
-@@ -2677,6 +2857,9 @@ fn main() -> anyhow::Result<()> {
+@@ -2677,6 +2904,9 @@ fn main() -> anyhow::Result<()> {
          let fraction = target as f32 / total as f32;
          match s.playback.seek(fraction) {
              Ok(()) => {
@@ -429,7 +609,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
                  let img = s.render_current();
                  if let (Some(app), Some(img)) = (app_weak.upgrade(), img) {
                      app.set_preview_frame(img);
-@@ -2731,13 +2914,27 @@ fn main() -> anyhow::Result<()> {
+@@ -2731,13 +2961,27 @@ fn main() -> anyhow::Result<()> {
      //      jumps from raw input events
  
      let state_ref = Rc::clone(&state);
@@ -459,7 +639,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
      });
  
      let state_ref = Rc::clone(&state);
-@@ -2784,8 +2981,15 @@ fn main() -> anyhow::Result<()> {
+@@ -2784,8 +3028,15 @@ fn main() -> anyhow::Result<()> {
      });
  
      let state_ref = Rc::clone(&state);
@@ -476,7 +656,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
      });
  
      let app_weak = app.as_weak();
-@@ -2796,6 +3000,9 @@ fn main() -> anyhow::Result<()> {
+@@ -2796,6 +3047,9 @@ fn main() -> anyhow::Result<()> {
              log::error!("Seek relative error: {e}");
              return;
          }
@@ -486,7 +666,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
          let img = s.render_current();
          if let (Some(app), Some(img)) = (app_weak.upgrade(), img) {
              app.set_preview_frame(img);
-@@ -3287,6 +3494,172 @@ fn main() -> anyhow::Result<()> {
+@@ -3287,6 +3541,172 @@ fn main() -> anyhow::Result<()> {
          }
      });
  
@@ -659,7 +839,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
      // ── Export dialog callbacks ──
      //
      // "Open" populates default values from current state (blend width
-@@ -3387,6 +3760,160 @@ fn main() -> anyhow::Result<()> {
+@@ -3387,6 +3807,160 @@ fn main() -> anyhow::Result<()> {
          let _ = (&app_weak, &name);
      });
  
@@ -820,7 +1000,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
      let app_weak = app.as_weak();
      let state_ref = Rc::clone(&state);
      app.on_start_export(move || {
-@@ -3451,6 +3978,41 @@ fn main() -> anyhow::Result<()> {
+@@ -3451,6 +4025,41 @@ fn main() -> anyhow::Result<()> {
          let start_secs = app.get_export_start_secs();
          let end_secs = app.get_export_end_secs();
          log::info!("Export range: start={start_secs:.1}s, end={end_secs:.1}s");
@@ -862,7 +1042,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
          let autocam = crate::export::AutocamUiConfig {
              enabled: app.get_export_autocam_enabled(),
              model_path: app.get_export_model_path().to_string(),
-@@ -3467,6 +4029,7 @@ fn main() -> anyhow::Result<()> {
+@@ -3467,6 +4076,7 @@ fn main() -> anyhow::Result<()> {
              fov_tight: app.get_export_fov_tight(),
              fov_wide: app.get_export_fov_wide(),
              fov_default: app.get_export_fov_default(),
@@ -870,7 +1050,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
          };
          let replay_enabled = app.get_export_replay_enabled();
          let events_enabled = app.get_export_events_enabled();
-@@ -3487,6 +4050,7 @@ fn main() -> anyhow::Result<()> {
+@@ -3487,6 +4097,7 @@ fn main() -> anyhow::Result<()> {
  
          // Reset cancel flag, start a fresh channel for completion.
          s.export_interrupted.store(false, Ordering::Relaxed);
@@ -878,7 +1058,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
          let interrupted = Arc::clone(&s.export_interrupted);
          let (tx, rx) = std::sync::mpsc::channel();
          s.export_rx = Some(rx);
-@@ -3725,6 +4289,8 @@ fn main() -> anyhow::Result<()> {
+@@ -3725,6 +4336,8 @@ fn main() -> anyhow::Result<()> {
                  && let Ok(outcome) = rx.try_recv()
              {
                  s.export_rx = None;
@@ -887,7 +1067,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
                  if let Some(h) = s.export_thread.take() {
                      let _ = h.join();
                  }
-@@ -3744,6 +4310,72 @@ fn main() -> anyhow::Result<()> {
+@@ -3744,6 +4357,72 @@ fn main() -> anyhow::Result<()> {
                      app.set_export_progress(0.0);
                      match outcome {
                          ExportOutcome::Ok(frames, path) => {
@@ -960,7 +1140,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
                              app.set_export_status_text("".into());
                              app.set_status_text(
                                  format!("Export complete: {frames} frames -> {}", path.display(),)
-@@ -3811,7 +4443,14 @@ fn main() -> anyhow::Result<()> {
+@@ -3811,7 +4490,14 @@ fn main() -> anyhow::Result<()> {
                          }
                          ExportOutcome::Cancelled => {
                              app.set_export_status_text("".into());
@@ -976,7 +1156,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
                              #[cfg(feature = "automation")]
                              if s.auto_export_mode {
                                  log::warn!(
-@@ -3849,6 +4488,14 @@ fn main() -> anyhow::Result<()> {
+@@ -3849,6 +4535,14 @@ fn main() -> anyhow::Result<()> {
                                      format!("{other}"),
                                  ),
                              };
@@ -991,7 +1171,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
                              // Build the detailed status now (body is moved into
                              // the toast below) and apply it AFTER sync_to_ui,
                              // whose status-bar fallback would otherwise replace
-@@ -3956,6 +4603,9 @@ fn main() -> anyhow::Result<()> {
+@@ -3956,6 +4650,9 @@ fn main() -> anyhow::Result<()> {
                  s.pending_seek = None;
                  match s.playback.seek(frac) {
                      Ok(()) => {
@@ -1001,7 +1181,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
                          let img = s.render_current();
                          if let (Some(app), Some(img)) = (app_weak.upgrade(), img) {
                              app.set_preview_frame(img);
-@@ -4022,7 +4672,6 @@ fn vsync_render_tick(state: &Rc<RefCell<AppState>>, app_weak: &slint::Weak<RecoA
+@@ -4022,7 +4719,6 @@ fn vsync_render_tick(state: &Rc<RefCell<AppState>>, app_weak: &slint::Weak<RecoA
          }
      }
  
@@ -1009,7 +1189,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
      let video_advanced = match s.playback.tick() {
          Ok(advanced) => advanced,
          Err(e) => {
-@@ -4033,9 +4682,14 @@ fn vsync_render_tick(state: &Rc<RefCell<AppState>>, app_weak: &slint::Weak<RecoA
+@@ -4033,9 +4729,14 @@ fn vsync_render_tick(state: &Rc<RefCell<AppState>>, app_weak: &slint::Weak<RecoA
              false
          }
      };
@@ -1027,7 +1207,7 @@ index 65a69d3ab865dd21e475965359a6711928e8b537..d3ed5a4b4d8dfa227b3944f748afe732
      // Clear dirty only if the camera has fully converged on its target.
 diff --git a/crates/reco-gui/src/review.rs b/crates/reco-gui/src/review.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..bef899c072859c5aa990c3855b4a1a7483920c79
+index 0000000000000000000000000000000000000000..89d8e05beb120e24352df49e6025ca69fe9436f7
 --- /dev/null
 +++ b/crates/reco-gui/src/review.rs
 @@ -0,0 +1,570 @@
@@ -1050,7 +1230,7 @@ index 0000000000000000000000000000000000000000..bef899c072859c5aa990c3855b4a1a74
 +
 +const PROJECT_VERSION: u32 = 1;
 +
-+/// One AI-generated camera pose.
++/// One AI-generated world-space camera pose.
 +#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 +pub struct TrajectoryPoint {
 +    pub frame: u64,
@@ -1063,7 +1243,7 @@ index 0000000000000000000000000000000000000000..bef899c072859c5aa990c3855b4a1a74
 +    pub detection_count: u32,
 +}
 +
-+/// A camera pose explicitly approved or corrected by the user.
++/// A world-space camera pose explicitly approved or corrected by the user.
 +#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 +pub struct ManualKeyframe {
 +    pub frame: u64,
@@ -1143,7 +1323,7 @@ index 0000000000000000000000000000000000000000..bef899c072859c5aa990c3855b4a1a74
 +            };
 +
 +            match kind {
-+                "pose_presented" => {
++                "pan_decision" => {
 +                    if let Some(pose) = value.get("pose") {
 +                        let pose: ViewportPosition = serde_json::from_value(pose.clone())
 +                            .with_context(|| {
