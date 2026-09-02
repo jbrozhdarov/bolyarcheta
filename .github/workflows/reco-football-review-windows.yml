@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: reco-project/video-stitcher
-          ref: cd3bf434030dd165d0417b1ef17ce090865eb783
+          ref: cd3bf434b92c678a5585cd9be2330eda49782a8a
           path: reco
 
       - name: Apply Football Review patch
@@ -99,8 +99,8 @@ jobs:
 
           $manifest = @"
           Reco Football Review 0.5.4-football-review.1
-          Base source: reco-project/video-stitcher cd3bf434030dd165d0417b1ef17ce090865eb783
-          Patch commit: cecda95
+          Base source: reco-project/video-stitcher cd3bf434b92c678a5585cd9be2330eda49782a8a
+          Patch commit: ee75792
           Target: x86_64-pc-windows-msvc
           AI runtime: ONNX Runtime 1.24.4 + DirectML 1.15.4
           Bundled model: official Reco v0.5.4 yolo26n.onnx
