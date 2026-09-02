@@ -82,7 +82,26 @@ jobs:
           New-Item -ItemType Directory -Path $staging | Out-Null
           Copy-Item "reco\target\x86_64-pc-windows-msvc\release\reco-gui.exe" "$staging\"
           Copy-Item "reco\LICENSE" "$staging\"
-          Copy-Item "reco\docs\FOOTBALL_REVIEW_BG.md" "$staging\README_FIRST_BG.md"
+          $readme = @"
+          RECO FOOTBALL REVIEW — БЪРЗ СТАРТ
+
+          1. Стартирайте reco-gui.exe.
+          2. Добавете камерите, синхронизирайте и калибрирайте както обичайно.
+          3. Натиснете Football Auto Setup за препоръчителните настройки.
+          4. Пуснете AI Review за анализ на целия мач.
+          5. Прегледайте жълтите зони с ниска увереност. На точна позиция
+             преместете кадъра и добавете ръчна ключова точка.
+          6. Използвайте Previous/Next issue и изгледайте траекторията докрай.
+          7. Експортирайте. Финалният export използва коригираната траектория.
+
+          Ръчните корекции са локални и плавно преминават обратно към AI пътя.
+          Проектът за преглед се запазва автоматично до проекта на видеото.
+
+          Включеният yolo26n.onnx е официалният общ модел на Reco v0.5.4,
+          а не специално обучен футболен модел. Затова прегледът и ръчните
+          ключови точки са важни при сложни сцени, заслоняване и лоша светлина.
+          "@
+          $readme | Set-Content "$staging\README_FIRST_BG.md" -Encoding utf8
           Copy-Item "$env:FFMPEG_DLL_DIR\*.dll" "$staging\"
           Copy-Item "$env:FFMPEG_DLL_DIR\ffmpeg.exe" "$staging\"
           Copy-Item "$env:ORT_DLL" "$staging\onnxruntime.dll"
